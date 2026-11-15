@@ -62,7 +62,7 @@ Initial Description and Link: lubridate date handling (`make_date()`, `ymd()`, `
 Revision/Addition Description and Link: _TBD_
 
 ### Arauca M
-Initial Description and Link: Explores butterfly data using tidyverse functions to demonstrate data cleaning, transformation, summarization, and visualization — [arauca_m_butterflies.qmd](vignettes/arauca_m_butterflies.qmd)
+Initial Description and Link: Explores butterfly data using tidyverse functions to demonstrate data cleaning, transformation, summarization, and visualization — [Butterfly Analysis Vignette](vignettes/arauca_m_butterflies.qmd)
 
 Revision/Addition Description and Link: _TBD_
 
