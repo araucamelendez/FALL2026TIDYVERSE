@@ -1,0 +1,285 @@
+---
+title: "A Little Butterfly Study: Exploring Nature with the Tidyverse"
+author: "Arauca Melendez"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# Introduction
+
+Butterflies are one of the things in nature that can make an ordinary day feel a little more special. I wanted to use a real dataset to explore when and where butterfly observations are recorded.
+
+For this vignette, I am using occurrence records from the **Global Biodiversity Information Facility (GBIF)**. GBIF collects biodiversity information shared by museums, researchers, nature organizations, and community observers.
+
+The main question for this analysis is:
+
+**How do recorded butterfly observations vary by month, species, and location?**
+
+I will use functions from the Tidyverse to bring the data into R, select useful columns, clean it, summarize it, and create a few visualizations.
+
+One important note: these are records of reported observations. They are not a complete count of every butterfly living in each place. More records in a month or location can reflect observation activity and data availability, not necessarily a larger butterfly population.
+
+## Setting up the packages
+
+The `tidyverse` package includes tools for organizing and visualizing data. I am also using `rgbif` to request occurrence records from GBIF.
+
+```{r}
+library(tidyverse)
+library(rgbif)
+```
+
+## Getting butterfly records from GBIF
+
+Butterflies belong to the superfamily *Papilionoidea*. Instead of typing in a taxonomic identification number, I use `name_backbone()` to ask GBIF to look up the name.
+
+Then `occ_search()` requests up to 300 records with coordinates and observation dates from 2000 through 2026.
+
+```{r}
+# Look up the butterfly group in the GBIF taxonomy.
+butterfly_taxon <- name_backbone(
+  name = "Papilionoidea",
+  rank = "SUPERFAMILY",
+  kingdom = "Animalia"
+)
+
+# Check the taxonomic match before downloading records.
+butterfly_taxon %>%
+  select(scientificName, rank, status, matchType, usageKey)
+```
+
+```{r}
+# Request up to 300 georeferenced butterfly occurrence records.
+butterfly_result <- occ_search(
+  taxonKey = butterfly_taxon$usageKey,
+  hasCoordinate = TRUE,
+  eventDate = "2000,2026",
+  limit = 300
+)
+
+# The occurrence records are stored in the data part of the result.
+butterfly_raw <- butterfly_result$data
+
+# See how many records were returned.
+nrow(butterfly_raw)
+```
+
+This is a sample of records returned by the GBIF search API, not every butterfly record in the GBIF database. 
+
+## Inspecting and selecting the data
+
+Before cleaning the data, I want to see what columns are available. `glimpse()` gives a quick look at the structure of the dataset.
+
+```{r}
+glimpse(butterfly_raw)
+```
+
+There are many columns in the original GBIF data. For this question, I only need the species name, observation date, country, coordinates, and type of record.
+
+I use `select()` to keep those columns. `any_of()` allows the code to select columns only when they are available in the returned data.
+
+```{r}
+butterfly_selected <- butterfly_raw %>%
+  select(any_of(c(
+    "gbifID",
+    "species",
+    "scientificName",
+    "eventDate",
+    "countryCode",
+    "decimalLatitude",
+    "decimalLongitude",
+    "basisOfRecord"
+  )))
+
+glimpse(butterfly_selected)
+```
+
+## Cleaning and creating new variables
+
+Some records may not have a species name or a usable observation date. I remove those rows for the parts of the analysis that need that information.
+
+I also use `mutate()` to create a date variable, a year, and a month. These new columns will make it easier to group the records by time.
+
+```{r}
+butterfly_clean <- butterfly_selected %>%
+  mutate(
+    event_date = as.Date(substr(eventDate, 1, 10)),
+    year = as.integer(format(event_date, "%Y")),
+    month_number = as.integer(format(event_date, "%m")),
+    month = factor(
+      format(event_date, "%B"),
+      levels = month.name,
+      ordered = TRUE
+    ),
+    species_name = coalesce(species, scientificName)
+  ) %>%
+  filter(
+    !is.na(event_date),
+    !is.na(species_name),
+    !is.na(decimalLatitude),
+    !is.na(decimalLongitude)
+  )
+
+# Check the cleaned data.
+glimpse(butterfly_clean)
+```
+
+I am keeping records with coordinates because I want to look at where observations were reported. This cleaning step may remove some records, so the final dataset will be smaller than the original search result.
+
+```{r}
+# Compare the number of records before and after cleaning.
+tibble(
+  stage = c("Original GBIF results", "After cleaning"),
+  records = c(nrow(butterfly_raw), nrow(butterfly_clean))
+)
+```
+
+##  Exploring observations by month
+
+First, I counted how many records appear in each month. The `count()` function is a shortcut for grouping the data and counting the rows.
+
+```{r}
+monthly_observations <- butterfly_clean %>%
+  count(month, name = "observations") %>%
+  arrange(month)
+
+monthly_observations
+```
+
+The chart below gives a simple view of which months have more records in this sample.
+
+```{r}
+ggplot(monthly_observations, aes(x = month, y = observations)) +
+  geom_col(fill = "orchid4") +
+  labs(
+    title = "Butterfly Records by Month",
+    subtitle = "GBIF records with dates and coordinates, 2000–2026",
+    x = "Month",
+    y = "Number of records"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+A higher bar means more records were returned for that month. It does not automatically mean there were more butterflies in nature during that month. Weather, observer activity, and which records have been shared with GBIF can all affect the pattern.
+
+Next, I group the records by species and count how many times each species appears. I use `arrange()` to put the most frequently recorded species first, and `slice_head()` to keep the first ten rows.
+
+```{r}
+top_species <- butterfly_clean %>%
+  count(species_name, sort = TRUE, name = "observations") %>%
+  slice_head(n = 10)
+
+top_species
+```
+
+```{r}
+ggplot(
+  top_species,
+  aes(x = fct_reorder(species_name, observations), y = observations)
+) +
+  geom_col(fill = "darkseagreen4") +
+  coord_flip() +
+  labs(
+    title = "Top 10 Most Frequently Recorded Butterfly Species",
+    x = "Species",
+    y = "Number of records"
+  ) +
+  theme_minimal()
+```
+
+This chart shows the ten species with the most records in the sample. A species appearing more often in the data does not necessarily mean it is the most common species overall. It may also be observed or reported more often.
+
+## Looking at observations by country
+
+I use `group_by()` and `summarise()` to calculate the number of records for each country. I remove records without a country code before making the summary.
+
+```{r}
+country_summary <- butterfly_clean %>%
+  filter(!is.na(countryCode)) %>%
+  group_by(countryCode) %>%
+  summarise(
+    observations = n(),
+    species_recorded = n_distinct(species_name),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(observations)) %>%
+  slice_head(n = 10)
+
+country_summary
+```
+
+This table compares the countries with the most records in the sample and the number of different species names recorded in each one.
+
+```{r}
+ggplot(
+  country_summary,
+  aes(x = fct_reorder(countryCode, observations), y = observations)
+) +
+  geom_col(fill = "mediumpurple3") +
+  coord_flip() +
+  labs(
+    title = "Countries with the Most Butterfly Records",
+    x = "Country code",
+    y = "Number of records"
+  ) +
+  theme_minimal()
+```
+
+## Reshaping a summary with tidyr
+
+The Tidyverse also includes `pivot_wider()`, which changes a dataset from a longer format to a wider format. Here, I use it to create a table with one row for each month and one column for each type of record.
+
+```{r}
+monthly_record_types <- butterfly_clean %>%
+  filter(!is.na(basisOfRecord)) %>%
+  count(month, basisOfRecord) %>%
+  pivot_wider(
+    names_from = basisOfRecord,
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  arrange(month)
+
+monthly_record_types
+```
+
+This is useful because it lets me compare the types of records being reported in different months. Some record types may not appear in every month, so `values_fill = 0` fills those empty combinations with zero.
+
+## Looking at the geographic spread
+
+Since the GBIF records include latitude and longitude, I can make a simple scatterplot to see where the observations are located.
+
+```{r}
+ggplot(
+  butterfly_clean,
+  aes(x = decimalLongitude, y = decimalLatitude)
+) +
+  geom_point(alpha = 0.35, size = 1, color = "darkolivegreen4") +
+  coord_quickmap() +
+  labs(
+    title = "Locations of Recorded Butterfly Observations",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_minimal()
+```
+
+Each point represents one record with coordinates. This is not a population map, but it helps show the geographic spread of the records included in this sample.
+
+
+# Data source and references
+
+The data for this vignette come from the **Global Biodiversity Information Facility (GBIF)** occurrence search.
+
+- GBIF website: <https://www.gbif.org/>
+- GBIF occurrence search API: <https://www.gbif.org/developer/occurrence>
+- `rgbif` package documentation: <https://docs.ropensci.org/rgbif/>
+- `tidyverse` documentation: <https://www.tidyverse.org/>
+
+The records are retrieved when the document is run, so the exact results may change over time. 
